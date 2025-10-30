@@ -421,7 +421,7 @@ def sidebar_inputs(cfg: InputConfig) -> InputConfig:
     # Contributions editor
     df_contrib = pd.DataFrame(cfg.cashflow.get("contributions", []) or [], columns=["year", "amount"]).astype({"year": int, "amount": float})
     st.sidebar.caption("Add rows for contribution schedule (year, amount)")
-    df_contrib = st.sidebar.data_editor(df_contrib, num_rows="dynamic", use_container_width=True)
+    df_contrib = st.sidebar.data_editor(df_contrib, num_rows="dynamic", width="stretch")
 
     st.sidebar.subheader("Advanced")
     phi = float(st.sidebar.number_input("Rebalancing turnover φ (taxable)", 0.0, 1.0, cfg.rebalance_phi, 0.05))
@@ -502,19 +502,44 @@ def app():
     for c in ["Ann Gross", "Ann Net"]:
         display[c] = (kpi_df[c] * 100).map(lambda v: f"{v:.2f}%")
 
-    st.dataframe(display, use_container_width=True, hide_index=True)
+    st.dataframe(display, width="stretch", hide_index=True)
 
     # Charts
-    left, right = st.columns(2)
-    with left:
-        st.markdown("#### Wealth Over Time — Net")
-        sel = st.selectbox("Select scenario for chart", options=sorted(all_ts["scenario"].unique()))
-        chart_df = all_ts[all_ts["scenario"] == sel].pivot(index="year", columns=["wrapper", "style"], values="total_net")
-        st.line_chart(chart_df)
-    with right:
-        st.markdown("#### Cumulative Drag (Gross − Net)")
-        drag_df = all_ts[all_ts["scenario"] == sel].pivot(index="year", columns=["wrapper", "style"], values="drag")
-        st.line_chart(drag_df)
+left, right = st.columns(2)
+
+# helper to build a flat (non-MultiIndex) pivot
+def build_flat_pivot(df: pd.DataFrame, value_col: str) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame()
+    tmp = df.copy()
+    tmp["series"] = (
+        tmp["wrapper"].astype(str).str.upper()
+        + " · "
+        + tmp["style"].astype(str).str.replace("_", " ").str.title()
+    )
+    out = tmp.pivot(index="year", columns="series", values=value_col).sort_index()
+    # ensure numeric and no weird dtypes
+    out = out.apply(pd.to_numeric, errors="coerce")
+    return out
+
+with left:
+    st.markdown("#### Wealth Over Time — Net")
+    options = sorted(all_ts["scenario"].unique())
+    sel = st.selectbox("Select scenario for chart", options=options)
+    scen = all_ts[all_ts["scenario"] == sel]
+    chart_df = build_flat_pivot(scen, value_col="total_net")
+    if chart_df.empty:
+        st.info("No data available for the selected scenario.")
+    else:
+        st.line_chart(chart_df, width="stretch")
+
+with right:
+    st.markdown("#### Cumulative Drag (Gross − Net)")
+    drag_df = build_flat_pivot(scen, value_col="drag")
+    if drag_df.empty:
+        st.info("No data available for the selected scenario.")
+    else:
+        st.line_chart(drag_df, width="stretch")
 
     # Download
     st.markdown("### Download Results")
